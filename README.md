@@ -54,3 +54,9 @@ Documents are stored in type-specific collections.
 do this!
 
 	ds.Flush()
+
+## Developing
+
+There is a fixture file in `testdata` that is generated using `go generate`.
+Certain changes to the tests may require you to regenerate this file. After
+regenerating it you should check it in.

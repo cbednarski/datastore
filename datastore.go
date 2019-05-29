@@ -56,8 +56,6 @@ import (
 	"encoding/gob"
 	"fmt"
 	"os"
-	"reflect"
-	"sort"
 	"sync"
 	"time"
 )
@@ -68,118 +66,14 @@ import (
 // header "datastore" that may be used to identify them.
 const Extension = ".datastore"
 
-// Collection is a RWMutex-managed map containing a type that embeds Document.
-// The fields Type, Items, and CurrentIndex are public for serialization
-// purposes but you should NEVER modify these directly. Use the methods instead.
-type Collection struct {
-	Type         string
-	Items        map[uint64]Document
-	CurrentIndex uint64
-	list         []uint64
-	mutex        sync.RWMutex
-	datastore    *Datastore
-}
-
-func (c *Collection) Upsert(document Document) error {
-	c.datastore.flush.Lock()
-	c.datastore.dirty = true
-	c.datastore.flush.Unlock()
-
-	kind := CName(document)
-	if c.Type != kind {
-		return fmt.Errorf("collection holds %s but document is %s", c.Type, kind)
-	}
-
-	c.mutex.Lock()
-
-	if document.ID() == 0 {
-		c.CurrentIndex += 1
-		document.SetID(c.CurrentIndex)
-	}
-
-	c.Items[document.ID()] = document
-	c.list = append(c.list, document.ID())
-	c.mutex.Unlock()
-	return nil
-}
-
-func (c *Collection) DeleteKey(key uint64) {
-	c.datastore.flush.Lock()
-	c.datastore.dirty = true
-	c.datastore.flush.Unlock()
-
-	c.mutex.Lock()
-	delete(c.Items, key)
-	deleteKeyFromList(&c.list, key)
-	c.mutex.Unlock()
-}
-
-func (c *Collection) Delete(document Document) {
-	if document.ID() == 0 {
-		return
-	}
-	c.DeleteKey(document.ID())
-}
-
-func (c *Collection) FindKey(key uint64) Document {
-	c.mutex.RLock()
-	defer c.mutex.RUnlock()
-
-	item, ok := c.Items[key]
-	if !ok {
-		return nil
-	}
-	return item
-}
-
-func (c *Collection) Find(finder func(Document) bool) []Document {
-	found := []Document{}
-	c.mutex.RLock()
-
-	for _, document := range c.Items {
-		if finder(document) {
-			found = append(found, document)
-		}
-	}
-
-	c.mutex.RUnlock()
-	return found
-}
-
-func (c *Collection) FindOne(finder func(Document) bool) Document {
-	c.mutex.RLock()
-	defer c.mutex.RUnlock()
-
-	for _, document := range c.Items {
-		if finder(document) {
-			return document
-		}
-	}
-	return nil
-}
-
-func (c *Collection) List() []uint64 {
-	c.mutex.RLock()
-	defer c.mutex.RUnlock()
-	return c.list
-}
-
-func (c *Collection) generateList() {
-	c.mutex.Lock()
-	c.list = []uint64{}
-	for _, item := range c.Items {
-		c.list = append(c.list, item.ID())
-	}
-	sort.Sort(UIntSlice(c.list))
-	c.mutex.Unlock()
-}
-
+// Datastore contains Collections of Documents and coordinates reading / writing
+// them to a file.
 type Datastore struct {
 	// Path to the datastore. It must be writable, and usually ends with the
 	// Datafile constant.
 	path string
 
-	// see Format
+	// see Signature
 	signature string
 
 	flush sync.Mutex
@@ -194,16 +88,21 @@ type Datastore struct {
 	Collections map[string]*Collection
 }
 
-// Signature is an application identifier that is validated during the Open
-// call. It is used to prevent different programs or incompatible versions of a
-// program from clobbering each other's data. It is also written into the file's
-// gzip header so it may be read before attempting to decode the data.
-//
-// Per the gzip spec, Signature must consist of ISO 8859-1 characters only.
+// Signature returns the signature for this datastore. See the Signature
+// package-level function for details.
 func (d *Datastore) Signature() string {
 	return d.signature
 }
 
+// In provides a pseudo-fluent interface to select a specific Collection from
+// this Datastore by name.
+//
+// If the collection does not already exist it will be initialized.
+//
+// You can use CName to determine the appropriate name
+// for a particular type (this is what InType does internally). In most cases it
+// will be easier to use InType but if you define a constant for each Collection
+// you can save yourself a bit of typing.
 func (d *Datastore) In(name string) *Collection {
 	// Find existing collection
 	if c, ok := d.Collections[name]; ok {
@@ -220,12 +119,18 @@ func (d *Datastore) In(name string) *Collection {
 	return c
 }
 
+// InType provides a pseudo-fluent interface to select a specific Collection
+// from the Datastore by type. The value passed is read with reflection but not
+// changed so you may pass a zero value in the call or use a "real" instance
+// that has other data in it.
+//
+// If the collection does not already exist it will be initialized.
 func (d *Datastore) InType(t interface{}) *Collection {
 	return d.In(CName(t))
 }
 
-// Flush writes any pending changes to disk, or no-ops if it has already flushed
-// all changes. This uses atomic replace and is not compatible with Windows.
+// Flush writes changes to disk, or no-ops if it has already flushed all
+// changes. This uses atomic replace and is not compatible with Windows.
 func (d *Datastore) Flush() error {
 	d.flush.Lock()
 	defer d.flush.Unlock()
@@ -269,7 +174,9 @@ func (d *Datastore) Flush() error {
 	return nil
 }
 
-// Create creates a new datastore and flushes it to disk
+// Create creates a new datastore and flushes it to disk. For details on
+// the signature parameter, see the docs for Signature. Create will immediately
+// call Flush to create the datastore file and detect any I/O problems.
 func Create(path, signature string) (*Datastore, error) {
 	store := &Datastore{
 		path:        path,
@@ -284,25 +191,33 @@ func Create(path, signature string) (*Datastore, error) {
 	return store, nil
 }
 
-// Open opens a datastore for reading and writing
+// Open opens a Datastore for reading and writing. The given signature must
+// match the signature stored in the specified Datastore.
+//
+// Important note: Before calling Open you must call gob.Register for each type
+// you expect to read from the Datastore or Gob will not be able to decode them.
+// Typically you should perform the gob.Register call in an init() func in the
+// same source file where you define the ID() and SetID() methods for your types.
 func Open(path, signature string) (*Datastore, error) {
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		return nil, err
 	}
 
-	// Read file from disk
 	// TODO acquire exclusive read/write lock when opening the file
-	file, err := os.Open(path)
+	//  Q: Is this actually necessary since we use an atomic write/rename? Probably...
+	file, err := os.OpenFile(path, os.O_RDONLY|os.O_EXCL, 0644)
 	if err != nil {
 		return nil, err
 	}
 	defer file.Close()
 
-	// Decompress file
 	reader, err := gzip.NewReader(file)
 	if err != nil {
 		return nil, err
 	}
+	defer reader.Close()
+
+	// Validate signature matches before we decode
 	if reader.Comment != Signature(signature) {
 		return nil, fmt.Errorf("datastore signature does not match. Expected %s, found %s", Signature(signature), reader.Comment)
 	}
@@ -317,6 +232,7 @@ func Open(path, signature string) (*Datastore, error) {
 		return nil, err
 	}
 
+	// Restore transient data structures (private fields)
 	for _, c := range store.Collections {
 		c.datastore = store
 		c.generateList()
@@ -325,6 +241,9 @@ func Open(path, signature string) (*Datastore, error) {
 	return store, nil
 }
 
+// OpenOrCreate is a convenience function that can be called to read or
+// initialize a datastore in a single call. We first call Open, and if the Open
+// call fails because of os.IsNotExist we will attempt to Create it.
 func OpenOrCreate(path, signature string) (store *Datastore, err error) {
 	store, err = Open(path, signature)
 	if err != nil && os.IsNotExist(err) {
@@ -333,46 +252,54 @@ func OpenOrCreate(path, signature string) (store *Datastore, err error) {
 	return
 }
 
-// CName derives the Collection name from a type
-func CName(kind interface{}) string {
-	return reflect.TypeOf(kind).String()
-}
-
+// Signature is a safety feature that prevents programs from attempting to read
+// or write incompatible schemas into the same datastore.
+//
+// For example, if you perform a major refactoring and need to read and write
+// old and new versions of a Datastore, you can use the signature to check the
+// schema version. Also, multiple programs that read/write Datastores should use
+// their own signatures so they do not accidentally clobber each other's data.
+//
+// There are no enforced rules but the recommended format is something like
+// program_name.data_version, which allows you to make major changes to your
+// data structures and still maintain backwards compatibility and/or provide an
+// upgrade path between versions. The Signature function prepends datastore: to
+// whatever value you supply.
+//
+// datastore's Open call enforces an exact match and datastore does not do any
+// fuzzy version matching. Remember that this is a version for your *data*, not
+// your program. See the Gob package for details on how the types themselves may
+// change over time without requiring a change in signature.
+//
+// Signature is stored in the gzip header for the Datastore so you can scan for
+// and read signatures without having to decode the entire structure. You can
+// use ReadSignature to inspect this header without attempting to read the
+// entire document into memory.
+//
+// Per the gzip spec, Signature must consist of ISO 8859-1 characters only.
 func Signature(signature string) string {
 	return "datastore:" + signature
 }
 
-type UIntSlice []uint64
-
-func (u UIntSlice) Len() int           { return len(u) }
-func (u UIntSlice) Less(i, j int) bool { return u[i] < u[j] }
-func (u UIntSlice) Swap(i, j int)      { u[i], u[j] = u[j], u[i] }
-
-func deleteKeyFromList(list *[]uint64, key uint64) {
-	// TODO replace this with a binary search when the list grows so we get
-	//  O(log n) instead of O(n). For smaller datasets it doesn't matter.
-	idx := -1
-	for i, val := range *list {
-		if val == key {
-			idx = i
-			break
-		}
-	}
-
-	// not found, exit
-	if idx < 0 {
+// ReadSignature is used to read the signature from a Datastore on disk without
+// decoding the entire file. The file will be opened in non-exclusive read mode.
+// Note that if the file is already locked this function may return an error.
+func ReadSignature(path string) (signature string, err error) {
+	if _, err = os.Stat(path); os.IsNotExist(err) {
 		return
 	}
-	// First item
-	if idx == 0 {
-		*list = (*list)[1:]
+
+	file, err := os.Open(path)
+	if err != nil {
 		return
 	}
-	// Last item
-	if idx == len(*list)-1 {
-		*list = (*list)[0:idx]
+	defer file.Close()
+
+	reader, err := gzip.NewReader(file)
+	if err != nil {
 		return
 	}
-	// Middle item
-	*list = append((*list)[0:idx], (*list)[idx+1:]...)
+	defer reader.Close()
+
+	return reader.Comment, nil
 }
