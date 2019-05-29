@@ -119,18 +119,15 @@ func TestLoadDatastore(t *testing.T) {
 }
 
 func TestSignature(t *testing.T) {
+	signature := "cakes"
+	expectedSignature := "datastore:cakes"
 
+	if datastore.Signature(signature) != expectedSignature {
+		t.Errorf("Expected %q, found %q", expectedSignature, datastore.Signature(DatastoreFormat))
+	}
+}
 
-	t.Run("signature function output", func(t *testing.T) {
-		signature := "cakes"
-		expectedSignature := "datastore:cakes"
-
-		if datastore.Signature(signature) != expectedSignature {
-			t.Errorf("Expected %q, found %q", expectedSignature, datastore.Signature(DatastoreFormat))
-		}
-	})
-
-	t.Run("creating a datastore", func(t *testing.T) {
+func TestSignatureOnCreate(t *testing.T) {
 		testFile := filepath.Join(os.TempDir(), "sample-datastore"+datastore.Extension)
 		defer os.RemoveAll(testFile)
 
@@ -145,9 +142,9 @@ func TestSignature(t *testing.T) {
 		if ds.Signature() != expectedSignature {
 			t.Errorf("Expected %q, found %q", expectedSignature, ds.Signature())
 		}
-	})
+	}
 
-	t.Run("opening a datastore", func(t *testing.T) {
+func TestSignatureOnOpen(t *testing.T) {
 		expectedSignature := "datastore:"+DatastoreFormat
 
 		ds, err := datastore.Open(filepath.Join("testdata", "datastore"), DatastoreFormat)
@@ -158,5 +155,24 @@ func TestSignature(t *testing.T) {
 		if ds.Signature() != expectedSignature {
 			t.Errorf("Expected %q, found %q", expectedSignature, ds.Signature())
 		}
-	})
+}
+
+func TestReadSignatureOnOpenError(t *testing.T) {
+	_, err := datastore.Open(filepath.Join("testdata", "datastore"), "candy")
+	if err != datastore.ErrInvalidSignature {
+		t.Errorf("Expected %q, found %q", datastore.ErrInvalidSignature, err)
+	}
+}
+
+func TestReadSignature(t *testing.T) {
+	expectedSignature := "datastore:"+DatastoreFormat
+
+	signature, err := datastore.ReadSignature(filepath.Join("testdata", "datastore"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if signature != expectedSignature {
+		t.Errorf("Expected %q, found %q", expectedSignature, signature)
+	}
 }

@@ -54,7 +54,7 @@ package datastore
 import (
 	"compress/gzip"
 	"encoding/gob"
-	"fmt"
+	"errors"
 	"os"
 	"sync"
 	"time"
@@ -65,6 +65,8 @@ import (
 // is not required. Note that datastore files will always have a gzip comment
 // header "datastore" that may be used to identify them.
 const Extension = ".datastore"
+
+var ErrInvalidSignature = errors.New("datastore signature does not match")
 
 // Datastore contains Collections of Documents and coordinates reading / writing
 // them to a file.
@@ -205,48 +207,51 @@ func Create(path, signature string) (*Datastore, error) {
 // you expect to read from the Datastore or Gob will not be able to decode them.
 // Typically you should perform the gob.Register call in an init() func in the
 // same source file where you define the ID() and SetID() methods for your types.
-func Open(path, signature string) (*Datastore, error) {
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		return nil, err
+//
+// If Open fails with ErrInvalidSignature you can call ds.Signature() on the
+// result to see what Signature was found on disk.
+func Open(path, signature string) (ds *Datastore, err error) {
+	if _, err = os.Stat(path); os.IsNotExist(err) {
+		return
 	}
 
 	// TODO acquire exclusive read/write lock when opening the file
 	//  Q: Is this actually necessary since we use an atomic write/rename? Probably...
 	file, err := os.OpenFile(path, os.O_RDONLY|os.O_EXCL, 0644)
 	if err != nil {
-		return nil, err
+		return
 	}
 	defer file.Close()
 
 	reader, err := gzip.NewReader(file)
 	if err != nil {
-		return nil, err
+		return
 	}
 	defer reader.Close()
 
-	// Validate signature matches before we decode
-	if reader.Comment != Signature(signature) {
-		return nil, fmt.Errorf("datastore signature does not match. Expected %s, found %s", Signature(signature), reader.Comment)
-	}
-
-	store := &Datastore{
+	ds = &Datastore{
 		path: path,
 		signature: reader.Comment,
 	}
 
+	// Validate signature matches before we decode
+	if reader.Comment != Signature(signature) {
+		return nil, ErrInvalidSignature
+	}
+
 	decoder := gob.NewDecoder(reader)
 
-	if err := decoder.Decode(store); err != nil {
-		return nil, err
+	if err = decoder.Decode(ds); err != nil {
+		return
 	}
 
 	// Restore transient data structures (private fields)
-	for _, c := range store.Collections {
-		c.datastore = store
+	for _, c := range ds.Collections {
+		c.datastore = ds
 		c.generateList()
 	}
 
-	return store, nil
+	return
 }
 
 // OpenOrCreate is a convenience function that can be called to read or
@@ -260,31 +265,29 @@ func OpenOrCreate(path, signature string) (store *Datastore, err error) {
 	return
 }
 
-// Signature is a safety feature that prevents programs from attempting to read
-// or write incompatible schemas into the same datastore.
+// Signature (the function) prepends "datastore:" to whatever value you supply.
+// It is called internally by Open and Create so you generally won't need to
+// call this function yourself.
 //
-// For example, if you perform a major refactoring and need to read and write
-// old and new versions of a Datastore, you can use the signature to check the
-// schema version. Also, multiple programs that read/write Datastores should use
-// their own signatures so they do not accidentally clobber each other's data.
+// Signature (the value) is used as a schema identifier to prevent programs from
+// reading or writing incompatible encodings to a Datastore file on disk.
 //
-// There are no enforced rules but the recommended format is something like
-// program_name.data_version, which allows you to make major changes to your
-// data structures and still maintain backwards compatibility and/or provide an
-// upgrade path between versions. The Signature function prepends datastore: to
-// whatever value you supply.
+// Each program should use a unique identifier for its Datastore signature. The
+// recommended format is program_name.schema_version, but it may be any string
+// of ISO-8859-1 characters. Including the schema version will allow your
+// program to change the format of the datastore over time without breaking
+// compatibility with older versions of the program or silently corrupting your
+// data if the wrong program version is used.
 //
 // datastore's Open call enforces an exact match and datastore does not do any
 // fuzzy version matching. Remember that this is a version for your *data*, not
-// your program. See the Gob package for details on how the types themselves may
-// change over time without requiring a change in signature.
+// your program. See the Gob package for details on how the types themselves are
+// allowed to change over time without requiring a change in signature.
 //
 // Signature is stored in the gzip header for the Datastore so you can scan for
 // and read signatures without having to decode the entire structure. You can
 // use ReadSignature to inspect this header without attempting to read the
 // entire document into memory.
-//
-// Per the gzip spec, Signature must consist of ISO 8859-1 characters only.
 func Signature(signature string) string {
 	return "datastore:" + signature
 }
