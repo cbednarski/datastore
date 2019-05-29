@@ -57,6 +57,13 @@ do this!
 
 ## Developing
 
+`datastore` is a library. Tests are written in the `datastore_test` package (not
+`datastore`) to ensure that the third party API works as expected and does not
+rely on private member access.
+
+Make sure to always run tests with the `-race` flag to ensure safe concurren
+ behavior.
+
 There is a fixture file in `testdata` that is generated using `go generate`.
 Certain changes to the tests may require you to regenerate this file. After
 regenerating it you should check it in.

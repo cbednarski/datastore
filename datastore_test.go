@@ -1,6 +1,6 @@
 //go:generate go test -run TestGenerateDatastore
 
-package datastore
+package datastore_test
 
 import (
 	"encoding/gob"
@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"git.stormbase.io/cbednarski/datastore"
 )
 
 const (
@@ -39,14 +41,14 @@ func TestCreateDatastore(t *testing.T) {
 	}
 	defer os.RemoveAll(tempdir)
 
-	datapath := filepath.Join(tempdir, Extension)
-	datastore, err := Create(datapath, DatastoreFormat)
+	datapath := filepath.Join(tempdir, datastore.Extension)
+	datastore, err := datastore.Create(datapath, DatastoreFormat)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if datastore.path != datapath {
-		t.Errorf("Expected %s, found %s", datapath, datastore.path)
+	if datastore.Path() != datapath {
+		t.Errorf("Expected %s, found %s", datapath, datastore.Path())
 	}
 }
 
@@ -72,7 +74,7 @@ func TestGenerateDatastore(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ds, err := Create(path, DatastoreFormat)
+	ds, err := datastore.Create(path, DatastoreFormat)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +83,7 @@ func TestGenerateDatastore(t *testing.T) {
 		Name: ExpectedName,
 	}
 
-	cname := CName(dummy)
+	cname := datastore.CName(dummy)
 
 	if err := ds.In(cname).Upsert(dummy); err != nil {
 		t.Fatal(err)
@@ -93,12 +95,12 @@ func TestGenerateDatastore(t *testing.T) {
 }
 
 func TestLoadDatastore(t *testing.T) {
-	ds, err := Open(filepath.Join("testdata", "datastore"), DatastoreFormat)
+	ds, err := datastore.Open(filepath.Join("testdata", "datastore"), DatastoreFormat)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	cname := CName(&DummyDocument{})
+	cname := datastore.CName(&DummyDocument{})
 
 	document := ds.In(cname).FindKey(1)
 
@@ -113,5 +115,13 @@ func TestLoadDatastore(t *testing.T) {
 
 	if dummy.Name != ExpectedName {
 		t.Errorf("Expected %q, found %q", ExpectedName, dummy.Name)
+	}
+}
+
+func TestSignature(t *testing.T) {
+	expectedSignature := "datastore:"+DatastoreFormat
+
+	if datastore.Signature(DatastoreFormat) != expectedSignature {
+		t.Errorf("Expected %q, found %q", expectedSignature, datastore.Signature(DatastoreFormat))
 	}
 }

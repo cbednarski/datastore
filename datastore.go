@@ -94,6 +94,13 @@ func (d *Datastore) Signature() string {
 	return d.signature
 }
 
+// Path returns the filesystem path where the datastore is located. This path is
+// the same as the one passed in during Open or Create and is NOT further
+// processed by path.Abs or any similar functions.
+func (d *Datastore) Path() string {
+	return d.path
+}
+
 // In provides a pseudo-fluent interface to select a specific Collection from
 // this Datastore by name.
 //
