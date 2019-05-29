@@ -229,11 +229,12 @@ func Open(path, signature string) (*Datastore, error) {
 		return nil, fmt.Errorf("datastore signature does not match. Expected %s, found %s", Signature(signature), reader.Comment)
 	}
 
-	decoder := gob.NewDecoder(reader)
-
 	store := &Datastore{
 		path: path,
+		signature: reader.Comment,
 	}
+
+	decoder := gob.NewDecoder(reader)
 
 	if err := decoder.Decode(store); err != nil {
 		return nil, err
