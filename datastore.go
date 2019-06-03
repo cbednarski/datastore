@@ -79,12 +79,7 @@ type Datastore struct {
 	// see Signature
 	signature string
 
-	flush sync.Mutex
-
-	// TODO replace this with an atomic value so we don't need to check flush
-	//  mutex to set the dirty flag. Or maybe just delete dirty completely and
-	//  flush every time.
-	dirty bool
+	mutex sync.Mutex
 
 	// Collections is public because Gob needs to read it. You should not modify
 	// this map directly. Use In(), InType(), and the Collection API instead.
@@ -113,6 +108,8 @@ func (d *Datastore) Path() string {
 // Note: We recommend using constants for your Collection names so a typo
 // doesn't cause your data to go into the wrong collection.
 func (d *Datastore) In(name string) *Collection {
+	d.mutex.Lock()
+	defer d.mutex.Unlock()
 	// Find existing collection
 	if c, ok := d.Collections[name]; ok {
 		return c
@@ -121,7 +118,6 @@ func (d *Datastore) In(name string) *Collection {
 	// Create a new collection
 	c := &Collection{
 		Items:     map[uint64]Document{},
-		datastore: d,
 	}
 	d.Collections[name] = c
 	return c
@@ -143,11 +139,8 @@ func (d *Datastore) Init(name string, document Document) (*Collection, error) {
 // Flush writes changes to disk, or no-ops if it has already flushed all
 // changes. This uses atomic replace and is not compatible with Windows.
 func (d *Datastore) Flush() error {
-	d.flush.Lock()
-	defer d.flush.Unlock()
-	if !d.dirty {
-		return nil
-	}
+	d.mutex.Lock()
+	defer d.mutex.Unlock()
 
 	temp := d.path + ".tmp"
 	final := d.path
@@ -156,7 +149,7 @@ func (d *Datastore) Flush() error {
 		return err
 	}
 
-	file, err := os.OpenFile(temp, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0644)
+	file, err := os.OpenFile(temp, os.O_RDWR|os.O_CREATE|os.O_TRUNC|os.O_EXCL, 0644)
 	if err != nil {
 		return err
 	}
@@ -225,7 +218,8 @@ func Open(path, signature string) (ds *Datastore, err error) {
 
 	// TODO acquire exclusive read/write lock when opening the file
 	//  Q: Is this actually necessary since we use an atomic write/rename? Probably...
-	file, err := os.OpenFile(path, os.O_RDWR|os.O_EXCL, 0644)
+	//file, err := os.OpenFile(path, os.O_RDWR|os.O_EXCL, 0644)
+	file, err := os.Open(path)
 	if err != nil {
 		return
 	}
@@ -255,7 +249,6 @@ func Open(path, signature string) (ds *Datastore, err error) {
 
 	// Restore transient data structures (private fields)
 	for _, c := range ds.Collections {
-		c.datastore = ds
 		c.generateList()
 	}
 

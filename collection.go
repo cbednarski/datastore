@@ -22,7 +22,6 @@ type Collection struct {
 
 	list         []uint64
 	mutex        sync.RWMutex
-	datastore    *Datastore
 }
 
 func (c *Collection) SetType(document Document) error {
@@ -41,10 +40,6 @@ func (c *Collection) SetType(document Document) error {
 
 // Upsert inserts or updates a Document in the collection.
 func (c *Collection) Upsert(document Document) error {
-	c.datastore.flush.Lock()
-	c.datastore.dirty = true
-	c.datastore.flush.Unlock()
-
 	if err := c.SetType(document); err != nil {
 		return err
 	}
@@ -65,10 +60,6 @@ func (c *Collection) Upsert(document Document) error {
 // DeleteKey removes the indicated key from the Collection, or no-ops if the key
 // is not present.
 func (c *Collection) DeleteKey(key uint64) {
-	c.datastore.flush.Lock()
-	c.datastore.dirty = true
-	c.datastore.flush.Unlock()
-
 	c.mutex.Lock()
 	delete(c.Items, key)
 	deleteKeyFromList(&c.list, key)
