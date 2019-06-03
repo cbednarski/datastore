@@ -5,31 +5,31 @@
 // database like Postgres, don't have the performance needs of LSM or LMDB, and
 // want a serialization format that is more Go-native than JSON.
 //
-// Data stored in a datastore must implement the Document interface and are
-// stored in a Collection based on their type. Each Document is indexed by a
-// uint64 that behaves as an autoincrement primary key field. Datastore
-// supports basic CRUD and Find* operations on each Collection.
+// Data stored in a Datastore must implement the Document interface and are
+// stored in Collections. Each Collection may include one type of Document. Each
+// Document is indexed by a uint64 that behaves as an autoincrement primary key
+// field. Datastore supports basic CRUD and Find operations on each Collection.
 //
 // Creating a collection:
 //
-//	ds, err := OpenOrCreate("datastore")
-//	collection := ds.InType(&MyType{})
+//	ds, err := datastore.OpenOrCreate("mypets.datastore")
+//	pets := ds.In("pets")
 //
 // Adding a new document:
 //
-//	myType := &MyType{}
-//	collection.Upsert(myType)
+//	pet := &Pet{}
+//	pets.Upsert(pet)
 //
 // When retrieving a document from a collection you must use a Go type assertion:
 //
-//	collection.FindOne(func(doc datastore.Document) bool {
-//		if myType, ok := doc.(*MyType); ok {
-//			return myType.Name == "this is the one!"
+//	pets.FindOne(func(doc datastore.Document) bool {
+//		if pet, ok := doc.(*Pet); ok {
+//			return pet.Name == "Chomper"
 //		}
 //		return false
 //	}
 //
-// Under the hood datastore encodes structs into a gzipped gob stream and writes
+// Under the hood datastore encodes structs into a gzipped Gob stream and writes
 // them to a file when you call Flush. Aside from Open and Flush, all other
 // operations are performed in memory, so your dataset (plus some overhead) must
 // not exceed available memory. In addition to decoding stored data, transitory
@@ -67,6 +67,7 @@ import (
 const Extension = ".datastore"
 
 var ErrInvalidSignature = errors.New("datastore signature does not match")
+var ErrInvalidType = errors.New("type does not match collection")
 
 // Datastore contains Collections of Documents and coordinates reading / writing
 // them to a file.
@@ -104,14 +105,13 @@ func (d *Datastore) Path() string {
 }
 
 // In provides a pseudo-fluent interface to select a specific Collection from
-// this Datastore by name.
+// this Datastore by name. Each collection may only hold one type of Document.
 //
-// If the collection does not already exist it will be initialized.
+// If the Collection does not already exist it will be initialized. Newly-
+// initialized Collections do not have a type until a Document is added.
 //
-// You can use CName to determine the appropriate name
-// for a particular type (this is what InType does internally). In most cases it
-// will be easier to use InType but if you define a constant for each Collection
-// you can save yourself a bit of typing.
+// Note: We recommend using constants for your Collection names so a typo
+// doesn't cause your data to go into the wrong collection.
 func (d *Datastore) In(name string) *Collection {
 	// Find existing collection
 	if c, ok := d.Collections[name]; ok {
@@ -120,7 +120,6 @@ func (d *Datastore) In(name string) *Collection {
 
 	// Create a new collection
 	c := &Collection{
-		Type:      name,
 		Items:     map[uint64]Document{},
 		datastore: d,
 	}
@@ -128,14 +127,17 @@ func (d *Datastore) In(name string) *Collection {
 	return c
 }
 
-// InType provides a pseudo-fluent interface to select a specific Collection
-// from the Datastore by type. The value passed is read with reflection but not
-// changed so you may pass a zero value in the call or use a "real" instance
-// that has other data in it.
-//
-// If the collection does not already exist it will be initialized.
-func (d *Datastore) InType(t interface{}) *Collection {
-	return d.In(CName(t))
+// Init wraps In to initialize a Collection with type information. The document
+// is not stored so it may be a zero type or an initialized document. Init
+// returns an error if the collection already exists and has a different type.
+func (d *Datastore) Init(name string, document Document) (*Collection, error) {
+	c := d.In(name)
+
+	if err := c.SetType(document); err != nil {
+		return nil, err
+	}
+
+	return c, nil
 }
 
 // Flush writes changes to disk, or no-ops if it has already flushed all
@@ -183,21 +185,27 @@ func (d *Datastore) Flush() error {
 	return nil
 }
 
+// New creates a new in-memory Datastore. Flush will never succeed with this
+// type of Datastore. For a persistent Datastore, start with Open or Create.
+func New() *Datastore {
+	return &Datastore{
+		Collections: map[string]*Collection{},
+	}
+}
+
 // Create creates a new datastore and flushes it to disk. For details on
 // the signature parameter, see the docs for Signature. Create will immediately
 // call Flush to create the datastore file and detect any I/O problems.
 func Create(path, signature string) (*Datastore, error) {
-	store := &Datastore{
-		path:        path,
-		signature:   Signature(signature),
-		Collections: map[string]*Collection{},
-	}
+	ds := New()
+	ds.path = path
+	ds.signature = Signature(signature)
 
-	if err := store.Flush(); err != nil {
+	if err := ds.Flush(); err != nil {
 		return nil, err
 	}
 
-	return store, nil
+	return ds, nil
 }
 
 // Open opens a Datastore for reading and writing. The given signature must
@@ -217,7 +225,7 @@ func Open(path, signature string) (ds *Datastore, err error) {
 
 	// TODO acquire exclusive read/write lock when opening the file
 	//  Q: Is this actually necessary since we use an atomic write/rename? Probably...
-	file, err := os.OpenFile(path, os.O_RDONLY|os.O_EXCL, 0644)
+	file, err := os.OpenFile(path, os.O_RDWR|os.O_EXCL, 0644)
 	if err != nil {
 		return
 	}

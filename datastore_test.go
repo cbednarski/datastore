@@ -3,10 +3,10 @@
 package datastore_test
 
 import (
-	"encoding/gob"
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"git.stormbase.io/cbednarski/datastore"
@@ -15,23 +15,36 @@ import (
 const (
 	ExpectedName    = "testeroonie"
 	DatastoreFormat = "datastore-test-format"
+	Names           = "names"
 )
 
-type DummyDocument struct {
-	Identifier uint64
-	Name       string
+func TestIn(t *testing.T) {
+	ds := datastore.New()
+	collection := ds.In("cake")
+
+	if collection.Type != "" {
+		t.Errorf("Expected empty string, found %#v", collection.Type)
+	}
 }
 
-func (t *DummyDocument) ID() uint64 {
-	return t.Identifier
-}
+func TestInit(t *testing.T) {
+	ds := datastore.New()
+	doc := &NameDocument{}
+	docType := reflect.TypeOf(&NameDocument{}).String()
 
-func (t *DummyDocument) SetID(i uint64) {
-	t.Identifier = i
-}
+	collection, err := ds.Init("cake", doc)
+	if err != nil {
+		t.Errorf("Expected no error, found %s", err)
+	}
+	if collection.Type != docType {
+		t.Errorf("Expected collection type %q, found %q", docType, collection.Type)
+	}
 
-func init() {
-	gob.Register(&DummyDocument{})
+	numdoc := &NumberDocument{}
+	_, err = ds.Init("cake", numdoc)
+	if err != datastore.ErrInvalidType {
+		t.Errorf("Expected %q, found %q", datastore.ErrInvalidType, err)
+	}
 }
 
 func TestCreateDatastore(t *testing.T) {
@@ -79,13 +92,11 @@ func TestGenerateDatastore(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	dummy := &DummyDocument{
+	nameDoc := &NameDocument{
 		Name: ExpectedName,
 	}
 
-	cname := datastore.CName(dummy)
-
-	if err := ds.In(cname).Upsert(dummy); err != nil {
+	if err := ds.In(Names).Upsert(nameDoc); err != nil {
 		t.Fatal(err)
 	}
 
@@ -100,17 +111,15 @@ func TestLoadDatastore(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cname := datastore.CName(&DummyDocument{})
-
-	document := ds.In(cname).FindKey(1)
+	document := ds.In(Names).FindKey(1)
 
 	if document == nil {
 		t.Fatal("document is nil")
 	}
 
-	dummy, ok := document.(*DummyDocument)
+	dummy, ok := document.(*NameDocument)
 	if !ok {
-		t.Fatal("document is not a *DummyDocument")
+		t.Fatal("document is not a *NameDocument")
 	}
 
 	if dummy.Name != ExpectedName {

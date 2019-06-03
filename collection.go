@@ -1,7 +1,6 @@
 package datastore
 
 import (
-	"fmt"
 	"reflect"
 	"sort"
 	"sync"
@@ -26,15 +25,28 @@ type Collection struct {
 	datastore    *Datastore
 }
 
+func (c *Collection) SetType(document Document) error {
+	kind := reflect.TypeOf(document).String()
+	switch c.Type {
+	case "": // Type isn't set yet, so set it to the current type
+		c.Type = kind
+		return nil
+	case kind: // Type is set to the same thing here, so do nothing
+		return nil
+	// Type is set to something different, return an error
+	default:
+		return ErrInvalidType
+	}
+}
+
 // Upsert inserts or updates a Document in the collection.
 func (c *Collection) Upsert(document Document) error {
 	c.datastore.flush.Lock()
 	c.datastore.dirty = true
 	c.datastore.flush.Unlock()
 
-	kind := CName(document)
-	if c.Type != kind {
-		return fmt.Errorf("collection holds %s but document is %s", c.Type, kind)
+	if err := c.SetType(document); err != nil {
+		return err
 	}
 
 	c.mutex.Lock()
@@ -42,13 +54,10 @@ func (c *Collection) Upsert(document Document) error {
 	if document.ID() == 0 {
 		c.CurrentIndex += 1
 		document.SetID(c.CurrentIndex)
+		c.list = append(c.list, document.ID())
 	}
 
 	c.Items[document.ID()] = document
-	// TODO this currently assumes that insertion is always in ascending order,
-	//  but in the case of a re-insertion (and possibly other cases) this is not
-	//  guaranteed. We need to perform a binary search / insert to fix this.
-	c.list = append(c.list, document.ID())
 	c.mutex.Unlock()
 	return nil
 }
@@ -66,14 +75,13 @@ func (c *Collection) DeleteKey(key uint64) {
 	c.mutex.Unlock()
 }
 
-// Delete removes the Document from the Collection. Note that Delete does not
-// invalidate the Document, so if you later call Upsert with the same Document
-// it will be re-inserted in place.
+// Delete removes the Document from the Collection and sets the ID to zero.
 func (c *Collection) Delete(document Document) {
 	if document.ID() == 0 {
 		return
 	}
 	c.DeleteKey(document.ID())
+	document.SetID(0)
 }
 
 // Find a Document by key. This is useful for "foreign key" type relationships
@@ -92,18 +100,17 @@ func (c *Collection) FindKey(key uint64) Document {
 }
 
 // Filter is a lookup-style function that returns a list of Documents that
-// satisfy the filter. If no Documents satisfy the filter, the list will be
-// empty. Your callback should perform a type assertion so you can inspect the
-// fields of the specific type, since filtering on Document type is useless. The
-// list of Documents is returned in random (map) order. This function enumerates
-// the entire Collection (i.e. table scan).
-func (c *Collection) Filter(finder func(Document) bool) []Document {
+// satisfy the filter. The Collection is scanned in ascending order. All
+// Documents satisfying the callback will be returned. If none are found the
+// list will be empty. This function always enumerates the entire Collection
+// (i.e. table scan).
+func (c *Collection) FindAll(finder func(Document) bool) []Document {
 	found := []Document{}
 	c.mutex.RLock()
 
-	for _, document := range c.Items {
-		if finder(document) {
-			found = append(found, document)
+	for _, key := range c.List() {
+		if finder(c.Items[key]) {
+			found = append(found, c.Items[key])
 		}
 	}
 
@@ -112,18 +119,16 @@ func (c *Collection) Filter(finder func(Document) bool) []Document {
 }
 
 // FindOne is a lookup-style function that returns the first Document that
-// satisfies the callback. Note that the map is iterated in random (map) order
-// so it's possible that calling this function multiple times with the same
-// function will return different documents. If no Document satisfying the
-// callback is found, FindOne returns nil. This function enumerates the entire
-// Collection (i.e. table scan) until a match is found.
+// satisfies the callback. The Collection is scanned in ascending order. FindOne
+// enumerates the entire Collection (i.e. table scan) until a match is found, or
+// returns nil if there is no match.
 func (c *Collection) FindOne(finder func(Document) bool) Document {
 	c.mutex.RLock()
 	defer c.mutex.RUnlock()
 
-	for _, document := range c.Items {
-		if finder(document) {
-			return document
+	for _, key := range c.List() {
+		if finder(c.Items[key]) {
+			return c.Items[key]
 		}
 	}
 	return nil
@@ -138,7 +143,7 @@ func (c *Collection) List() []uint64 {
 }
 
 // generateList is an internal call that rebuilds the list of keys after
-// restoring a datastore from disk. It should not need to be called otherwise.
+// restoring a Datastore from disk. It should not need to be called otherwise.
 func (c *Collection) generateList() {
 	c.mutex.Lock()
 	c.list = []uint64{}
@@ -147,9 +152,4 @@ func (c *Collection) generateList() {
 	}
 	sort.Sort(UIntSlice(c.list))
 	c.mutex.Unlock()
-}
-
-// CName derives the Collection name from a type.
-func CName(kind interface{}) string {
-	return reflect.TypeOf(kind).String()
 }
