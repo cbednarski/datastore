@@ -17,7 +17,7 @@ func (n *NameDocument) SetID(i uint64) {
 
 type NumberDocument struct {
 	Identifier uint64
-	Number int
+	Number     int
 }
 
 func (n *NumberDocument) ID() uint64 {
@@ -36,10 +36,9 @@ func init() {
 	// do this.
 }
 
-
 type InvalidDocument struct {
 	Identifier uint64
-	Name string
+	Name       string
 }
 
 func (i *InvalidDocument) ID() uint64 {
@@ -49,4 +48,3 @@ func (i *InvalidDocument) ID() uint64 {
 func (i *InvalidDocument) SetID(id uint64) {
 	i.Identifier = id
 }
-

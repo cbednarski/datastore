@@ -12,16 +12,16 @@ import (
 type Collection struct {
 	// Type indicates the reflected type of the Documents stored in this
 	// collection. DO NOT MODIFY.
-	Type         string
+	Type string
 
 	// Items holds the map of Documents in this Collection. DO NOT MODIFY.
-	Items        map[uint64]Document
+	Items map[uint64]Document
 
 	// CurrentIndex holds the autoincrement value for this Collection. DO NOT MODIFY.
 	CurrentIndex uint64
 
-	list         []uint64
-	mutex        sync.RWMutex
+	list  []uint64
+	mutex sync.RWMutex
 }
 
 func (c *Collection) SetType(document Document) error {

@@ -4,8 +4,9 @@ import (
 	"reflect"
 	"testing"
 
-	"git.stormbase.io/cbednarski/datastore"
 	"strings"
+
+	"git.stormbase.io/cbednarski/datastore"
 )
 
 func TestCollection_Upsert(t *testing.T) {

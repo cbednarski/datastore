@@ -4,6 +4,7 @@ package datastore
 // declare your own variables using this type you only need to wrap the []uint64
 // during the sort call.
 type UIntSlice []uint64
+
 func (u UIntSlice) Len() int           { return len(u) }
 func (u UIntSlice) Less(i, j int) bool { return u[i] < u[j] }
 func (u UIntSlice) Swap(i, j int)      { u[i], u[j] = u[j], u[i] }
@@ -14,9 +15,9 @@ func binarySearchList(list *[]uint64, key uint64) int {
 	for low <= high {
 		mid = low + ((high - low) / 2)
 		if key < (*list)[mid] {
-			high = mid-1
+			high = mid - 1
 		} else if key > (*list)[mid] {
-			low = mid +1
+			low = mid + 1
 		} else {
 			return mid
 		}

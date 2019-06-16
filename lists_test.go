@@ -48,7 +48,7 @@ func TestDeleteKeyFromList(t *testing.T) {
 		list := []uint64{1, 2, 3, 4}
 		expected := []uint64{1, 2, 3, 4}
 		deleteKeyFromList(&list, 5)
-		if ! reflect.DeepEqual(list, expected) {
+		if !reflect.DeepEqual(list, expected) {
 			t.Errorf("Expected %#v, found %#v", expected, list)
 		}
 	})
@@ -73,8 +73,8 @@ func SetupLists(size, ratio int) (list, search []uint64) {
 	// For example size factor 4 means we delete 25% of the items in the
 	// list. 32 is approximately 3% deletion rate.
 	rng := rand.New(rand.NewSource(seed))
-	list = make([]uint64, size *ratio)
-	for i := 0; i < size *ratio; i++ {
+	list = make([]uint64, size*ratio)
+	for i := 0; i < size*ratio; i++ {
 		list[i] = rng.Uint64()
 	}
 	sort.Sort(UIntSlice(list))
@@ -93,21 +93,21 @@ func SetupLists(size, ratio int) (list, search []uint64) {
 var t = 0
 
 func TestSearchScanList(t *testing.T) {
-	list := []uint64{2, 4, 6, 7, 8, 9, 13, 16, 17, 19, 20, 21, 22, 23, 24, 25,26, 27, 28, 29, 30, 32, 33, 34, 36, 37, 38, 39, 40, 41, 44, 45, 47, 48, 50, 51, 53, 55, 57, 60, 61, 62, 63, 64, 65, 80, 81, 82, 83, 84, 85}
+	list := []uint64{2, 4, 6, 7, 8, 9, 13, 16, 17, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 32, 33, 34, 36, 37, 38, 39, 40, 41, 44, 45, 47, 48, 50, 51, 53, 55, 57, 60, 61, 62, 63, 64, 65, 80, 81, 82, 83, 84, 85}
 
 	type testCase struct {
-		Input uint64
+		Input    uint64
 		Expected int
 	}
 
-	cases := []testCase {
-		{ 1, -1},
-		{ 2, 0},
-		{ 13, 6},
-		{ 15, -1},
-		{ 23, 13},
-		{ 40, 28},
-		{ 85, 50},
+	cases := []testCase{
+		{1, -1},
+		{2, 0},
+		{13, 6},
+		{15, -1},
+		{23, 13},
+		{40, 28},
+		{85, 50},
 	}
 
 	for _, c := range cases {

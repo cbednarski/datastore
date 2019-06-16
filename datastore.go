@@ -117,7 +117,7 @@ func (d *Datastore) In(name string) *Collection {
 
 	// Create a new collection
 	c := &Collection{
-		Items:     map[uint64]Document{},
+		Items: map[uint64]Document{},
 	}
 	d.Collections[name] = c
 	return c
@@ -232,7 +232,7 @@ func Open(path, signature string) (ds *Datastore, err error) {
 	defer reader.Close()
 
 	ds = &Datastore{
-		path: path,
+		path:      path,
 		signature: reader.Comment,
 	}
 

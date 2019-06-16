@@ -9,10 +9,10 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"strings"
 	"testing"
 
 	"git.stormbase.io/cbednarski/datastore"
-	"strings"
 )
 
 const (
@@ -267,33 +267,33 @@ func TestSignature(t *testing.T) {
 func TestSignatureOnCreate(t *testing.T) {
 	// TODO This test completely duplicates some other Open and Create tests;
 	//  it would be nice to remove the duplication
-		testFile := filepath.Join(os.TempDir(), "sample-datastore"+datastore.Extension)
-		defer os.RemoveAll(testFile)
+	testFile := filepath.Join(os.TempDir(), "sample-datastore"+datastore.Extension)
+	defer os.RemoveAll(testFile)
 
-		signature := "throwaway"
+	signature := "throwaway"
 
-		ds, err := datastore.Create(testFile, signature)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		expectedSignature := datastore.Signature(signature)
-		if ds.Signature() != expectedSignature {
-			t.Errorf("Expected %q, found %q", expectedSignature, ds.Signature())
-		}
+	ds, err := datastore.Create(testFile, signature)
+	if err != nil {
+		t.Fatal(err)
 	}
 
+	expectedSignature := datastore.Signature(signature)
+	if ds.Signature() != expectedSignature {
+		t.Errorf("Expected %q, found %q", expectedSignature, ds.Signature())
+	}
+}
+
 func TestSignatureOnOpen(t *testing.T) {
-		expectedSignature := "datastore:"+ TestdataSignature
+	expectedSignature := "datastore:" + TestdataSignature
 
-		ds, err := datastore.Open(TestdataDatastore, TestdataSignature)
-		if err != nil {
-			t.Fatal(err)
-		}
+	ds, err := datastore.Open(TestdataDatastore, TestdataSignature)
+	if err != nil {
+		t.Fatal(err)
+	}
 
-		if ds.Signature() != expectedSignature {
-			t.Errorf("Expected %q, found %q", expectedSignature, ds.Signature())
-		}
+	if ds.Signature() != expectedSignature {
+		t.Errorf("Expected %q, found %q", expectedSignature, ds.Signature())
+	}
 }
 
 func TestReadSignatureOnOpenError(t *testing.T) {
@@ -304,7 +304,7 @@ func TestReadSignatureOnOpenError(t *testing.T) {
 }
 
 func TestReadSignature(t *testing.T) {
-	expectedSignature := "datastore:"+ TestdataSignature
+	expectedSignature := "datastore:" + TestdataSignature
 
 	signature, err := datastore.ReadSignature(TestdataDatastore)
 	if err != nil {
